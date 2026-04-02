@@ -1,4 +1,4 @@
-"""v1 — MVP: REPL + 6 tools + streaming agentic loop."""
+"""v2 — Markdown rendering: two-pass stream + rich.Markdown."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 import anthropic
+from rich.console import Console
+from rich.markdown import Markdown
 
 from .api import create_client, stream_message
 from .tools import all_tools
@@ -26,13 +28,17 @@ You are an AI coding assistant. You help users with software engineering tasks.
 - Use Bash for shell commands. Prefer dedicated tools over shell equivalents.
 
 # Response Style
-- Be concise and direct. Keep changes minimal and focused."""
+- Be concise and direct. Keep changes minimal and focused.
+- Use markdown formatting when helpful."""
+
+console = Console(stderr=True)
+out = Console()
 
 
 def main() -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        print("Error: ANTHROPIC_API_KEY not set. Add it to .env or environment.", file=sys.stderr)
+        console.print("[red]Error: ANTHROPIC_API_KEY not set. Add it to .env or environment.[/red]")
         sys.exit(1)
 
     config = Config(
@@ -44,8 +50,8 @@ def main() -> None:
     messages: list[dict[str, Any]] = []
     tool_map = {t.name: t for t in all_tools}
 
-    print(f"\n  nano-claude v1 (model: {config.model})")
-    print("  Type your message. Ctrl+C to exit.\n")
+    out.print(f"\n  [bold cyan]nano-claude[/bold cyan] [dim]v2 (model: {config.model})[/dim]")
+    out.print("[dim]  Type your message. Ctrl+C to exit.\n[/dim]")
 
     try:
         while True:
@@ -58,8 +64,10 @@ def main() -> None:
 
             messages.append({"role": "user", "content": user_input})
 
-            # ── Agentic loop: call API → execute tools → repeat ──
+            # ── Agentic loop ──
             while True:
+                # Two-pass: stream raw text first, then re-render with markdown
+                text_buffer = ""
                 sys.stdout.write("\033[34mAssistant: \033[0m")
                 sys.stdout.flush()
 
@@ -67,7 +75,21 @@ def main() -> None:
                     client, config, messages, all_tools,
                     on_text=lambda delta: (sys.stdout.write(delta), sys.stdout.flush()),
                 )
-                print()
+
+                # Collect text from response
+                for block in response.content:
+                    if block.get("type") == "text":
+                        text_buffer += block.get("text", "")
+
+                # Re-render with markdown
+                if text_buffer.strip():
+                    raw_lines = text_buffer.count("\n") + 1
+                    sys.stdout.write("\r\033[K")
+                    for _ in range(raw_lines):
+                        sys.stdout.write("\033[A\033[K")
+                    sys.stdout.flush()
+                    out.print("[blue]Assistant:[/blue]")
+                    out.print(Markdown(text_buffer))
 
                 messages.append({"role": "assistant", "content": response.content})
 
@@ -80,7 +102,10 @@ def main() -> None:
                 tool_results: list[dict[str, Any]] = []
                 for tu in tool_uses:
                     tool = tool_map.get(tu["name"])
-                    print(f"\n  \033[2m[tool]\033[0m \033[33m{tu['name']}\033[0m \033[2m{_format_input(tu)}\033[0m")
+                    console.print(
+                        f"\n  [dim][tool][/dim] [yellow]{tu['name']}[/yellow]"
+                        f" [dim]{_format_input(tu)}[/dim]"
+                    )
 
                     if not tool:
                         tool_results.append({
@@ -95,14 +120,14 @@ def main() -> None:
                         result = tool.call(**tu.get("input", {}))
                         if len(result) > 80_000:
                             result = result[:40_000] + "\n...[truncated]...\n" + result[-40_000:]
-                        print(f"  \033[2m[result] {result.count(chr(10)) + 1} lines\033[0m")
+                        console.print(f"  [dim][result] {result.count(chr(10)) + 1} lines[/dim]")
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tu["id"],
                             "content": result,
                         })
                     except Exception as e:
-                        print(f"  \033[31m[error] {e}\033[0m")
+                        console.print(f"  [red][error] {e}[/red]")
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tu["id"],
@@ -116,7 +141,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
 
-    print("\nBye!")
+    console.print("[dim]\nBye![/dim]")
 
 
 def _format_input(tu: dict[str, Any]) -> str:
