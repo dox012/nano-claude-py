@@ -1,4 +1,4 @@
-"""v6 — Multi-level CLAUDE.md + persistent memory."""
+"""v7 — Sub-agent tool for parallel research."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from rich.markdown import Markdown
 
 from .api import create_client, stream_message
 from .tools import all_tools
+from .tools.agent import init_agent_tool
 from .permissions import classify_tool_risk, ask_permission
 from .session import (
     new_session_id, save_session, load_session, print_session_list,
@@ -37,6 +38,7 @@ class App:
             system_prompt=build_system_prompt(),
         )
         self.client = create_client(self.config)
+        init_agent_tool(self.client, self.config.model, self.config.system_prompt)
         self.messages: list[dict[str, Any]] = []
         self.total_input = 0
         self.total_output = 0
