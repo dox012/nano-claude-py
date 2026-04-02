@@ -1,4 +1,4 @@
-"""v4 — Session persistence + resume + slash commands."""
+"""v5 — Smart conversation compaction."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .permissions import classify_tool_risk, ask_permission
 from .session import (
     new_session_id, save_session, load_session, print_session_list,
 )
+from .compact import smart_compact, should_auto_compact, estimate_tokens
 from .types import Config
 
 SYSTEM_PROMPT = """\
@@ -56,6 +57,16 @@ class App:
         tool_map = {t.name: t for t in all_tools}
 
         while True:
+            # Auto-compact if context is getting large
+            if should_auto_compact(self.messages):
+                console.print("[yellow]\n  [auto-compact] Context window filling up...[/yellow]")
+                try:
+                    compacted, saved = smart_compact(self.client, self.config, self.messages)
+                    self.messages[:] = compacted
+                    console.print(f"[yellow]  [auto-compact] Saved {saved} messages[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]  [auto-compact failed] {e}[/red]")
+
             text_buffer = ""
             sys.stdout.write("\033[34mAssistant: \033[0m")
             sys.stdout.flush()
@@ -143,6 +154,7 @@ class App:
             out.print("  /help      Show this help")
             out.print("  /cost      Show token usage")
             out.print("  /clear     Clear conversation history")
+            out.print("  /compact   Summarize conversation to save context")
             out.print("  /model     Show or change model")
             out.print("  /sessions  List saved sessions")
             out.print("  /resume    Resume a saved session")
@@ -156,6 +168,21 @@ class App:
             self.total_input = 0
             self.total_output = 0
             out.print("[yellow]Conversation cleared.[/yellow]")
+
+        elif cmd == "/compact":
+            if len(self.messages) <= 4:
+                out.print("[dim]Nothing to compact.[/dim]")
+                return
+            try:
+                compacted, saved = smart_compact(self.client, self.config, self.messages)
+                self.messages[:] = compacted
+                tokens = estimate_tokens(self.messages)
+                out.print(
+                    f"[yellow]Compacted: {len(self.messages) + saved} -> "
+                    f"{len(self.messages)} messages (~{tokens} tokens)[/yellow]"
+                )
+            except Exception as e:
+                out.print(f"[red]Compact failed: {e}[/red]")
 
         elif cmd == "/model":
             arg = user_input[len("/model"):].strip()
