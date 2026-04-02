@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends"
+
+[project]
+name = "nano-claude"
+version = "0.1.0"
+description = "Lightweight Claude Code MVP - minimal agentic coding assistant (Python port)"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.39.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+nano-claude = "nano_claude.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nano_claude"]
