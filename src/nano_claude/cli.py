@@ -1,4 +1,4 @@
-"""v2 — Markdown rendering: two-pass stream + rich.Markdown."""
+"""v3 — Permission confirmation + bash safety."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from rich.markdown import Markdown
 
 from .api import create_client, stream_message
 from .tools import all_tools
+from .permissions import classify_tool_risk, ask_permission
 from .types import Config
 
 SYSTEM_PROMPT = """\
@@ -115,6 +116,20 @@ def main() -> None:
                             "is_error": True,
                         })
                         continue
+
+                    # Permission check
+                    tool_input = tu.get("input", {})
+                    risk = classify_tool_risk(tu["name"], tool_input)
+                    if risk != "safe":
+                        if not ask_permission(tu["name"], tool_input, risk):
+                            console.print("[red]  [denied][/red]")
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": tu["id"],
+                                "content": "Permission denied by user.",
+                                "is_error": True,
+                            })
+                            continue
 
                     try:
                         result = tool.call(**tu.get("input", {}))
