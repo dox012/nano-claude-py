@@ -1,4 +1,4 @@
-"""v5 — Smart conversation compaction."""
+"""v6 — Multi-level CLAUDE.md + persistent memory."""
 
 from __future__ import annotations
 
@@ -21,20 +21,9 @@ from .session import (
     new_session_id, save_session, load_session, print_session_list,
 )
 from .compact import smart_compact, should_auto_compact, estimate_tokens
+from .prompt import build_system_prompt
+from .memory import save_memory, delete_memory, print_memories
 from .types import Config
-
-SYSTEM_PROMPT = """\
-You are an AI coding assistant. You help users with software engineering tasks.
-
-# Tool Usage
-- Use Read to read files before editing. Never edit a file you haven't read.
-- Use Edit for modifying existing files. Use Write only for new files or complete rewrites.
-- Use Glob to find files by name pattern. Use Grep to search file contents.
-- Use Bash for shell commands. Prefer dedicated tools over shell equivalents.
-
-# Response Style
-- Be concise and direct. Keep changes minimal and focused.
-- Use markdown formatting when helpful."""
 
 console = Console(stderr=True)
 out = Console()
@@ -45,7 +34,7 @@ class App:
         self.config = Config(
             model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=16384,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=build_system_prompt(),
         )
         self.client = create_client(self.config)
         self.messages: list[dict[str, Any]] = []
@@ -158,6 +147,9 @@ class App:
             out.print("  /model     Show or change model")
             out.print("  /sessions  List saved sessions")
             out.print("  /resume    Resume a saved session")
+            out.print("  /remember  Save a memory (/remember key: content)")
+            out.print("  /forget    Delete a memory (/forget key)")
+            out.print("  /memory    List saved memories")
 
         elif cmd == "/cost":
             out.print(f"[cyan]\nTokens: {self.total_input} in / {self.total_output} out[/cyan]")
@@ -191,6 +183,32 @@ class App:
                 out.print(f"[cyan]Model set to: {arg}[/cyan]")
             else:
                 out.print(f"[cyan]Current model: {self.config.model}[/cyan]")
+
+        elif cmd == "/remember":
+            body = user_input[len("/remember"):].strip()
+            colon_idx = body.find(":")
+            if not body or colon_idx == -1:
+                out.print("[dim]  Usage: /remember key: content[/dim]")
+                return
+            key = body[:colon_idx].strip()
+            content = body[colon_idx + 1:].strip()
+            save_memory(key, content)
+            out.print(f"[green]  Saved memory: {key}[/green]")
+            self.config.system_prompt = build_system_prompt()
+
+        elif cmd == "/forget":
+            key = user_input[len("/forget"):].strip()
+            if not key:
+                out.print("[dim]  Usage: /forget key[/dim]")
+                return
+            if delete_memory(key):
+                out.print(f"[yellow]  Deleted memory: {key}[/yellow]")
+                self.config.system_prompt = build_system_prompt()
+            else:
+                out.print(f"[red]  Memory not found: {key}[/red]")
+
+        elif cmd == "/memory":
+            print_memories()
 
         elif cmd == "/sessions":
             print_session_list()
